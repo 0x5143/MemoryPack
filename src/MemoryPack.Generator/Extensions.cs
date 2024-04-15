@@ -86,13 +86,16 @@ internal static class Extensions
         var packableCtorArgs = memPackAttr?.ConstructorArguments;
         generateType = GenerateType.Object;
         serializeLayout = SerializeLayout.Sequential;
+
         if (memPackAttr == null || packableCtorArgs == null)
         {
-            generateType = GenerateType.NoGenerate;
+            var memPackUnionFormatterAttr = symbol.GetAttribute(references.MemoryPackUnionFormatterAttribute);
+            generateType = memPackUnionFormatterAttr != null ? GenerateType.Union : GenerateType.NoGenerate;
             serializeLayout = SerializeLayout.Sequential;
             return false;
         }
-        else if (packableCtorArgs.Value.Length != 0)
+
+        if (packableCtorArgs.Value.Length != 0)
         {
             // MemoryPackable has three attribtues
             // [GenerateType generateType]
@@ -248,15 +251,14 @@ internal static class Extensions
         }
     }
 
-    public static bool TryGetConstructorParameter(this IMethodSymbol constructor, ISymbol member, out string? constructorParameterName)
+    public static bool TryGetConstructorParameter(this IMethodSymbol constructor, ISymbol member, out IParameterSymbol? constructorParameter)
     {
-        var constructorParameter = GetConstructorParameter(constructor, member.Name);
+        constructorParameter = GetConstructorParameter(constructor, member.Name);
         if (constructorParameter == null && member.Name.StartsWith(UnderScorePrefix))
         {
             constructorParameter = GetConstructorParameter(constructor, member.Name.Substring(UnderScorePrefix.Length));
         }
 
-        constructorParameterName = constructorParameter?.Name;
         return constructorParameter != null;
 
         static IParameterSymbol? GetConstructorParameter(IMethodSymbol constructor, string name) => constructor.Parameters.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));

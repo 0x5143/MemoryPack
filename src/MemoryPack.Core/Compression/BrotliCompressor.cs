@@ -70,6 +70,12 @@ public
         return bufferWriter.GetSpan(sizeHint);
     }
 
+    public int GetMaxCompressedLength()
+    {
+        ThrowIfDisposed();
+        return BrotliUtils.BrotliEncoderMaxCompressedSize(bufferWriter.TotalWritten);
+    }
+
     public byte[] ToArray()
     {
         ThrowIfDisposed();
@@ -126,12 +132,12 @@ public
             var writtenNotAdvanced = 0;
             foreach (var item in bufferWriter)
             {
-                writtenNotAdvanced = CompressCore(ref encoder, item.Span, ref Unsafe.AsRef(destBufferWriter), initialLength: null, isFinalBlock: false);
+                writtenNotAdvanced = CompressCore(ref encoder, item.Span, ref Unsafe.AsRef(in destBufferWriter), initialLength: null, isFinalBlock: false);
             }
 
             // call BrotliEncoderOperation.Finish
             var finalBlockLength = (writtenNotAdvanced == 0) ? null : (int?)(writtenNotAdvanced + 10);
-            CompressCore(ref encoder, ReadOnlySpan<byte>.Empty, ref Unsafe.AsRef(destBufferWriter), initialLength: finalBlockLength, isFinalBlock: true);
+            CompressCore(ref encoder, ReadOnlySpan<byte>.Empty, ref Unsafe.AsRef(in destBufferWriter), initialLength: finalBlockLength, isFinalBlock: true);
         }
         finally
         {
@@ -168,10 +174,18 @@ public
             }
 
             // call BrotliEncoderOperation.Finish
-            var finalStatus = encoder.Compress(ReadOnlySpan<byte>.Empty, buffer, out var consumed, out var written, isFinalBlock: true);
-            if (written > 0)
+            var finalStatus = OperationStatus.DestinationTooSmall;
+            while (finalStatus == OperationStatus.DestinationTooSmall)
             {
-                await stream.WriteAsync(buffer.AsMemory(0, written), cancellationToken).ConfigureAwait(false);
+                finalStatus = encoder.Compress(ReadOnlySpan<byte>.Empty, buffer, out var consumed, out var written, isFinalBlock: true);
+                if (written > 0)
+                {
+                    await stream.WriteAsync(buffer.AsMemory(0, written), cancellationToken).ConfigureAwait(false);
+                }
+            }
+            if (finalStatus != OperationStatus.Done)
+            {
+                MemoryPackSerializationException.ThrowCompressionFailed(finalStatus);
             }
         }
         finally
@@ -192,15 +206,17 @@ public
         var encoder = new BrotliEncoder(quality, window);
         try
         {
-            var writtenNotAdvanced = 0;
+            var bytesWritten = 0;
             foreach (var item in bufferWriter)
             {
-                writtenNotAdvanced = CompressCore(ref encoder, item.Span, ref memoryPackWriter, initialLength: null, isFinalBlock: false);
+                var span = item.Span;
+                if (span.Length <= 0) continue;
+                bytesWritten += CompressCore(ref encoder, span, ref memoryPackWriter, initialLength: null, isFinalBlock: false);
             }
 
             // call BrotliEncoderOperation.Finish
-            var finalBlockLength = (writtenNotAdvanced == 0) ? null : (int?)(writtenNotAdvanced + 10);
-            CompressCore(ref encoder, ReadOnlySpan<byte>.Empty, ref memoryPackWriter, initialLength: finalBlockLength, isFinalBlock: true);
+            var finalBlockMaxLength = BrotliUtils.BrotliEncoderMaxCompressedSize(bytesWritten) - bytesWritten;
+            CompressCore(ref encoder, ReadOnlySpan<byte>.Empty, ref memoryPackWriter, initialLength: finalBlockMaxLength, isFinalBlock: true);
         }
         finally
         {
@@ -243,22 +259,23 @@ public
         where TBufferWriter : class, IBufferWriter<byte>
 #endif
     {
-        var writtenNotAdvanced = 0;
+        var totalWritten = 0;
 
         var lastResult = OperationStatus.DestinationTooSmall;
+
+        var destLength = initialLength ?? BrotliUtils.BrotliEncoderMaxCompressedSize(source.Length);
         while (lastResult == OperationStatus.DestinationTooSmall)
         {
-            ref var spanRef = ref destBufferWriter.GetSpanReference(initialLength ?? source.Length);
+            ref var spanRef = ref destBufferWriter.GetSpanReference(destLength);
             var dest = MemoryMarshal.CreateSpan(ref spanRef, destBufferWriter.BufferLength);
 
             lastResult = encoder.Compress(source, dest, out int bytesConsumed, out int bytesWritten, isFinalBlock: isFinalBlock);
-            writtenNotAdvanced += bytesConsumed;
+            totalWritten += bytesWritten;
 
             if (lastResult == OperationStatus.InvalidData) MemoryPackSerializationException.ThrowCompressionFailed();
             if (bytesWritten > 0)
             {
                 destBufferWriter.Advance(bytesWritten);
-                writtenNotAdvanced = 0;
             }
             if (bytesConsumed > 0)
             {
@@ -266,7 +283,7 @@ public
             }
         }
 
-        return writtenNotAdvanced;
+        return totalWritten;
     }
 
     public void Dispose()

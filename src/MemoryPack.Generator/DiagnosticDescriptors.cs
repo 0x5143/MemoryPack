@@ -316,4 +316,20 @@ internal static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor GenerateTypeCannotSpeciyToUnionBaseType = new(
+        id: "MEMPACK039",
+        title: "GenerateType cannot be specified for the Union base type itself",
+        messageFormat: "The MemoryPackable object '{0}' cannot specify '{1}'. Because it is Union base type.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor SuppressDefaultInitializationMustBeSettable = new(
+        id: "MEMPACK040",
+        title: "Readonly member cannot specify [SuppressDefaultInitialization]",
+        messageFormat: "The MemoryPackable object '{0}' member '{1}' has [SuppressDefaultInitialization], it cannot be readonly, init-only and required.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
 }

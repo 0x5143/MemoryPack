@@ -1,8 +1,6 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 
@@ -485,7 +483,7 @@ partial {{classOrStructOrRecord}} {{TypeName}}
         }
 {{circularReferenceBody}}
 {{readBeginBody}}
-{{circularReferenceBody2}}        
+{{circularReferenceBody2}}
 {{Members.Where(x => x.Symbol != null).Select(x => $"        {x.MemberType.FullyQualifiedToString()} __{x.Name};").NewLine()}}
 
         {{(!isVersionTolerant ? "" : "var readCount = " + count + ";")}}
@@ -532,7 +530,7 @@ partial {{classOrStructOrRecord}} {{TypeName}}
             {
                 goto NEW;
             }
-{{(IsValueType ? "#if false" : "            else")}}            
+{{(IsValueType ? "#if false" : "            else")}}
             {
                 goto SET;
             }
@@ -541,7 +539,7 @@ partial {{classOrStructOrRecord}} {{TypeName}}
 
     SET:
         {{(!IsUseEmptyConstructor ? "goto NEW;" : "")}}
-{{Members.Where(x => x.Symbol != null).Where(x => x.IsAssignable).Select(x => $"        {(IsUseEmptyConstructor ? "" : "// ")}value.@{x.Name} = __{x.Name};").NewLine()}}
+{{Members.Where(x => x.IsAssignable).Select(x => $"        {(IsUseEmptyConstructor ? "" : "// ")}value.@{x.Name} = __{x.Name};").NewLine()}}
         goto READ_END;
 
     NEW:
@@ -549,6 +547,7 @@ partial {{classOrStructOrRecord}} {{TypeName}}
         {
 {{EmitDeserializeConstruction("            ")}}
         };
+{{EmitDeserializeConstructionWithBranching("        ")}}
     READ_END:
 {{readEndBody}}
 """;
@@ -669,7 +668,7 @@ partial {{classOrStructOrRecord}} {{TypeName}}
 {{EmitSerializeMembers(Members, "            ", toTempWriter: true, writeObjectHeader: false)}}
 
             tempWriter.Flush();
-            
+
             writer.WriteObjectHeader({{Members.Length}});
             for (int i = 0; i < {{Members.Length}}; i++)
             {
@@ -898,7 +897,7 @@ partial {{classOrStructOrRecord}} {{TypeName}}
         }
         else
         {
-            var nameDict = Members.Where(x => x.Symbol != null && x.IsConstructorParameter).ToDictionary(x => x.ConstructorParameterName, x => x.Name, StringComparer.OrdinalIgnoreCase);
+            var nameDict = Members.Where(x => x.IsConstructorParameter).ToDictionary(x => x.ConstructorParameterName, x => x.Name, StringComparer.OrdinalIgnoreCase);
             var parameters = this.Constructor.Parameters
                 .Select(x =>
                 {
@@ -918,8 +917,21 @@ partial {{classOrStructOrRecord}} {{TypeName}}
     {
         // all value is deserialized, __Name is exsits.
         return string.Join("," + Environment.NewLine, Members
-            .Where(x => x.IsSettable && !x.IsConstructorParameter)
+            .Where(x => x is { IsSettable: true, IsConstructorParameter: false, SuppressDefaultInitialization: false })
             .Select(x => $"{indent}@{x.Name} = __{x.Name}"));
+    }
+
+    string EmitDeserializeConstructionWithBranching(string indent)
+    {
+        var members = Members
+            .Select((x, i) => (x, i))
+            .Where(v => v.x.SuppressDefaultInitialization);
+
+        var lines = GenerateType is GenerateType.VersionTolerant or GenerateType.CircularReference
+            ? members.Select(v => $"{indent}if (deltas.Length > {v.i} && deltas[{v.i}] != 0) value.@{v.x.Name} = __{v.x.Name};")
+            : members.Select(v => $"{indent}if ({v.i + 1} <= count) value.@{v.x.Name} = __{v.x.Name};");
+
+        return lines.NewLine();
     }
 
     string EmitUnionTemplate(IGeneratorContext context)
@@ -982,7 +994,7 @@ partial {{classOrInterfaceOrRecord}} {{TypeName}} : IMemoryPackFormatterRegister
         {
 {{OnDeserializing.Select(x => "            " + x.Emit()).NewLine()}}
 {{EmitUnionDeserializeBody()}}
-{{OnDeserialized.Select(x => "            " + x.Emit()).NewLine()}}            
+{{OnDeserialized.Select(x => "            " + x.Emit()).NewLine()}}
         }
     }
 }
@@ -1039,7 +1051,7 @@ partial class {{TypeName}} : MemoryPackFormatter<{{symbolFullQualified}}>
         {
 {{OnDeserializing.Select(x => "            " + x.Emit()).NewLine()}}
 {{EmitUnionDeserializeBody()}}
-{{OnDeserialized.Select(x => "            " + x.Emit()).NewLine()}}            
+{{OnDeserialized.Select(x => "            " + x.Emit()).NewLine()}}
         }
 }
 
@@ -1051,7 +1063,7 @@ public static class {{initializerName}}
     public static void RegisterFormatter()
     {
 {{registerFormatterCode}}
-    }    
+    }
 }
 """;
 
@@ -1112,7 +1124,7 @@ public static class {{initializerName}}
 
                 switch (tag)
                 {
-{{writeBody}}                
+{{writeBody}}
                     default:
                         break;
                 }
@@ -1162,7 +1174,7 @@ public static class {{initializerName}}
 {{OnDeserialized.Select(x => "                " + x.Emit()).NewLine()}}
                 return;
             }
-        
+
             switch (tag)
             {
 {{readBody}}
@@ -1261,7 +1273,7 @@ public partial class MemberMeta
             case MemberKind.MemoryPackableArray:
                 return $"{writer}.WritePackableArray(value.@{Name});";
             case MemberKind.MemoryPackableList:
-                return $"global::MemoryPack.Formatters.ListFormatter.SerializePackable(ref {writer}, ref System.Runtime.CompilerServices.Unsafe.AsRef(value.@{Name}));";
+                return $"global::MemoryPack.Formatters.ListFormatter.SerializePackable(ref {writer}, value.@{Name});";
             case MemberKind.Array:
                 return $"{writer}.WriteArray(value.@{Name});";
             case MemberKind.Blank:
@@ -1367,4 +1379,3 @@ public partial class MemberMeta
         }
     }
 }
-
