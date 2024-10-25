@@ -4,6 +4,13 @@ using System.Security.Principal;
 
 namespace SandboxWebApp;
 
+[MemoryPackable]
+[GenerateTypeScript]
+public partial class FooBarBazDayonDattayon
+{
+    public int MyProperty { get; set; }
+}
+
 
 [MemoryPackable]
 [GenerateTypeScript]
@@ -189,4 +196,12 @@ public enum Gender
 public partial class Rec
 {
     public required Rec Id { get; init; }
+}
+
+[MemoryPackable]
+[GenerateTypeScript]
+public partial class NullableFloatTest
+{
+    public float? NullableFloat { get; set; }
+    public double? NullableDouble { get; set; }
 }

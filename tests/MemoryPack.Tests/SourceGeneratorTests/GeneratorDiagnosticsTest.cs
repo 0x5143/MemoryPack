@@ -18,7 +18,7 @@ public partial class GeneratorDiagnosticsTest
 {
     void Compile(int id, string code, bool allowMultipleError = false)
     {
-        var diagnostics = CSharpGeneratorRunner.RunGenerator(code);
+        var (_, diagnostics) = CSharpGeneratorRunner.RunGenerator(code);
         if (!allowMultipleError)
         {
             diagnostics.Length.Should().Be(1);
@@ -39,22 +39,6 @@ using MemoryPack;
 [MemoryPackable]
 public class Hoge
 {
-}
-""");
-    }
-
-    [Fact]
-    public void MEMPACK002_NestedNotAllow()
-    {
-        Compile(2, """
-using MemoryPack;
-
-public partial class Hoge
-{
-    [MemoryPackable]
-    public partial class Huga
-    {
-    }
 }
 """);
     }
@@ -544,11 +528,11 @@ public partial struct Hoge
 """;
 
         {
-            var diagnostics = CSharpGeneratorRunner.RunGenerator(code, preprocessorSymbols: new[] { "NET7_0_OR_GREATER" });
+            var (_, diagnostics) = CSharpGeneratorRunner.RunGenerator(code, preprocessorSymbols: new[] { "NET7_0_OR_GREATER" });
             diagnostics.Length.Should().Be(0);
         }
         {
-            var diagnostics = CSharpGeneratorRunner.RunGenerator(code, preprocessorSymbols: new string[] { });
+            var (_, diagnostics) = CSharpGeneratorRunner.RunGenerator(code, preprocessorSymbols: new string[] { });
             diagnostics.Length.Should().Be(1);
             diagnostics[0].Id.Should().Be("MEMPACK034");
         }
@@ -687,9 +671,39 @@ public partial class Tester
 }
 
 """);
+    }
 
+    [Fact]
+    public void MEMPACK041_UnmanagedStructCannotBeVersionTolerant()
+    {
+        Compile(41, """
+using MemoryPack;
+
+[MemoryPackable(GenerateType.VersionTolerant)]
+public partial struct Tester
+{
+    [MemoryPackOrder(0)]
+    public int I1 { get; init; }
+}
+""");
+    }
+
+    [Fact]
+    public void MEMPACK042_NestedContainingTypesMustBePartial()
+    {
+        Compile(42, """
+                    using MemoryPack;
+
+                    public struct NestedContainer
+                    {
+                        [MemoryPackable]
+                        public partial struct NestedStruct
+                        {
+                            public int I1 { get; init; }
+                        }
+                    }
+                    """);
     }
 }
-
 
 #endif

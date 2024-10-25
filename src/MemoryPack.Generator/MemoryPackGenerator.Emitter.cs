@@ -25,10 +25,9 @@ partial class MemoryPackGenerator
             return;
         }
 
-        // nested is not allowed
-        if (IsNested(syntax))
+        if (IsNested(syntax) && !IsNestedContainingTypesPartial(syntax))
         {
-            context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.NestedNotAllow, syntax.Identifier.GetLocation(), typeSymbol.Name));
+            context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.NestedContainingTypesMustBePartial, syntax.Identifier.GetLocation(), typeSymbol.Name));
             return;
         }
 
@@ -76,6 +75,7 @@ partial class MemoryPackGenerator
 #pragma warning disable CS0162 // Unreachable code
 #pragma warning disable CS0164 // This label has not been referenced
 #pragma warning disable CS0219 // Variable assigned but never used
+#pragma warning disable CS0618 // Type or member is obsolete
 #pragma warning disable CS8600 // Converting null literal or possible null value to non-nullable type.
 #pragma warning disable CS8601 // Possible null reference assignment
 #pragma warning disable CS8602
@@ -156,6 +156,21 @@ using MemoryPack;
         return typeDeclaration.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword));
     }
 
+    static bool IsNestedContainingTypesPartial(TypeDeclarationSyntax typeDeclaration)
+    {
+        if (typeDeclaration.Parent is TypeDeclarationSyntax parentTypeDeclaration)
+        {
+            if (!IsPartial(parentTypeDeclaration))
+                return false;
+
+            return IsNestedContainingTypesPartial(parentTypeDeclaration);
+        }
+        else
+        {
+            return true;
+        }
+    }
+
     static bool IsNested(TypeDeclarationSyntax typeDeclaration)
     {
         return typeDeclaration.Parent is TypeDeclarationSyntax;
@@ -180,7 +195,7 @@ using MemoryPack;
         {
             if (type.IsUnmanagedType)
             {
-                sb.Append("GanerateType unmanaged ");
+                sb.Append("GenerateType unmanaged ");
             }
             else
             {
@@ -295,6 +310,21 @@ public partial class TypeMeta
             (false, false) => "class",
         };
 
+        var containingTypeDeclarations = new List<string>();
+        var containingType = Symbol.ContainingType;
+        while (containingType is not null)
+        {
+            containingTypeDeclarations.Add((containingType.IsRecord, containingType.IsValueType) switch
+            {
+                (true, true) => $"partial record struct {containingType.Name}",
+                (true, false) => $"partial record {containingType.Name}",
+                (false, true) => $"partial struct {containingType.Name}",
+                (false, false) => $"partial class {containingType.Name}",
+            });
+            containingType = containingType.ContainingType;
+        }
+        containingTypeDeclarations.Reverse();
+
         var nullable = IsValueType ? "" : "?";
 
         string staticRegisterFormatterMethod, staticMemoryPackableMethod, scopedRef, constraint, registerBody, registerT;
@@ -343,6 +373,12 @@ public partial class TypeMeta
         var serializeMethodSignarture = context.IsForUnity
             ? "Serialize(ref MemoryPackWriter"
             : "Serialize<TBufferWriter>(ref MemoryPackWriter<TBufferWriter>";
+
+        foreach (var declaration in containingTypeDeclarations)
+        {
+            writer.AppendLine(declaration);
+            writer.AppendLine("{");
+        }
 
         writer.AppendLine($$"""
 partial {{classOrStructOrRecord}} {{TypeName}} : IMemoryPackable<{{TypeName}}>{{fixedSizeInterface}}
@@ -419,6 +455,10 @@ partial {{classOrStructOrRecord}} {{TypeName}}
             writer.AppendLine(code);
         }
 
+        for(int i = 0; i < containingTypeDeclarations.Count; ++i)
+        {
+            writer.AppendLine("}");
+        }
     }
 
     private string EmitDeserializeBody()
